@@ -1,0 +1,15 @@
+﻿{
+  "name": "linebot-sheet-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Notify a LINE group when a Google Spreadsheet is edited",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^10.3.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  }
+}
