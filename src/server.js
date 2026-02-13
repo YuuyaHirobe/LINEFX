@@ -92,9 +92,13 @@ app.post('/notify', express.json(), async (req, res) => {
 
     const hasChangedCells = Array.isArray(changedCells) && changedCells.length > 0;
     const lines = hasChangedCells
-      ? ['スプ氏を変更したよ。確認してね', ...changedCells.slice(0, 3)]
+      ? [
+          'スプシを変更したよ。確認してね',
+          ...changedCells.slice(0, 3),
+          spreadsheetUrl ? `URL: ${spreadsheetUrl}` : null
+        ].filter(Boolean)
       : [
-          'スプ氏を変更したよ。確認してね',
+          'スプシを変更したよ。確認してね',
           a1Notation ? `セル: ${a1Notation}` : null,
           typeof newValue !== 'undefined' ? `変更後: ${String(newValue)}` : null,
           editedAt ? `時刻: ${editedAt}` : null,
