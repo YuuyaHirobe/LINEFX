@@ -13,12 +13,10 @@ const LINE_GROUP_ID = '';
 // Treat "sheet closed" as "no edits for this duration".
 const QUIET_PERIOD_SECONDS = 120;
 const MAX_BUFFERED_CHANGES = 50;
-const MAX_LINES_IN_MESSAGE = 10;
+const MAX_LINES_IN_MESSAGE = 3;
 
 const KEY_PENDING = 'pending_changes';
 const KEY_LAST_EDITED_AT = 'last_edited_at';
-const KEY_SS_NAME = 'spreadsheet_name';
-const KEY_SS_URL = 'spreadsheet_url';
 
 function onEdit(e) {
   if (!e || !e.range) return;
@@ -29,7 +27,6 @@ function onEdit(e) {
   try {
     const range = e.range;
     const sheet = range.getSheet();
-    const ss = sheet.getParent();
 
     const oneChange = {
       sheetName: sheet.getName(),
@@ -49,8 +46,6 @@ function onEdit(e) {
 
     props.setProperty(KEY_PENDING, JSON.stringify(pending));
     props.setProperty(KEY_LAST_EDITED_AT, String(Date.now()));
-    props.setProperty(KEY_SS_NAME, ss.getName());
-    props.setProperty(KEY_SS_URL, ss.getUrl());
 
     // Keep only one pending flush trigger so edits are coalesced.
     clearFlushTriggers_();
@@ -89,21 +84,13 @@ function flushBufferedNotifications() {
 
     const total = pending.length;
     const head = pending.slice(-MAX_LINES_IN_MESSAGE);
-    const lines = head.map(function(c) {
-      return c.sheetName + ' ' + c.a1Notation + ': ' + c.oldValue + ' -> ' + c.newValue;
+    const changedCells = head.map(function(c) {
+      return c.a1Notation;
     });
 
-    if (total > head.length) {
-      lines.unshift('... ' + (total - head.length) + '件の変更は省略');
-    }
-
     const payload = {
-      spreadsheetName: props.getProperty(KEY_SS_NAME) || '',
-      spreadsheetUrl: props.getProperty(KEY_SS_URL) || '',
-      sheetName: '複数',
-      a1Notation: total + '件の変更',
-      oldValue: '',
-      newValue: lines.join('\n'),
+      changedCells: changedCells,
+      changeCount: total,
       editedAt: new Date(lastEditedAt).toISOString()
     };
 

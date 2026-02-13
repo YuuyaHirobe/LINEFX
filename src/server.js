@@ -81,7 +81,8 @@ app.post('/notify', express.json(), async (req, res) => {
       newValue,
       oldValue,
       editedAt,
-      groupId
+      groupId,
+      changedCells
     } = req.body || {};
 
     const targetGroupId = groupId || process.env.LINE_GROUP_ID;
@@ -89,16 +90,19 @@ app.post('/notify', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'Missing target groupId or LINE_GROUP_ID' });
     }
 
-    const lines = [
-      'スプレッドシート更新を検知しました。',
-      spreadsheetName ? `ファイル: ${spreadsheetName}` : null,
-      sheetName ? `シート: ${sheetName}` : null,
-      a1Notation ? `セル: ${a1Notation}` : null,
-      typeof oldValue !== 'undefined' ? `変更前: ${String(oldValue)}` : null,
-      typeof newValue !== 'undefined' ? `変更後: ${String(newValue)}` : null,
-      editedAt ? `時刻: ${editedAt}` : null,
-      spreadsheetUrl ? `URL: ${spreadsheetUrl}` : null
-    ].filter(Boolean);
+    const hasChangedCells = Array.isArray(changedCells) && changedCells.length > 0;
+    const lines = hasChangedCells
+      ? ['スプ氏を変更したよ。確認してね', ...changedCells.slice(0, 3)]
+      : [
+          'スプ氏を変更したよ。確認してね',
+          a1Notation ? `セル: ${a1Notation}` : null,
+          typeof newValue !== 'undefined' ? `変更後: ${String(newValue)}` : null,
+          editedAt ? `時刻: ${editedAt}` : null,
+          spreadsheetName ? `ファイル: ${spreadsheetName}` : null,
+          sheetName ? `シート: ${sheetName}` : null,
+          typeof oldValue !== 'undefined' ? `変更前: ${String(oldValue)}` : null,
+          spreadsheetUrl ? `URL: ${spreadsheetUrl}` : null
+        ].filter(Boolean);
 
     await client.pushMessage({
       to: targetGroupId,
