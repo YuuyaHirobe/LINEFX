@@ -8,7 +8,7 @@
  */
 
 const WEBHOOK_URL = 'https://YOUR_SERVER_DOMAIN/notify';
-const NOTIFY_API_KEY = 'YOUR_RANDOM_SHARED_SECRET';
+const NOTIFY_API_KEY = 'WjmOE135yXwtGdsNgrIpuLeq6UzJca9fnF7lQP0h';
 // Optional: set if you want to override server-side LINE_GROUP_ID
 const LINE_GROUP_ID = '';
 
