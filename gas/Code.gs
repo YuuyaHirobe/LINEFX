@@ -1,51 +1,146 @@
 ﻿/**
  * Google Apps Script side for spreadsheet edit notifications.
  *
- * Steps:
- * 1) Open the target spreadsheet -> Extensions -> Apps Script
- * 2) Paste this file and set constants below
- * 3) Create installable trigger: onEdit -> Head deployment
+ * Behavior:
+ * - Buffer edits on each onEdit event
+ * - Send one summary notification after a quiet period
  */
 
 const WEBHOOK_URL = 'https://YOUR_SERVER_DOMAIN/notify';
 const NOTIFY_API_KEY = 'WjmOE135yXwtGdsNgrIpuLeq6UzJca9fnF7lQP0h';
-// Optional: set if you want to override server-side LINE_GROUP_ID
 const LINE_GROUP_ID = '';
+
+// Treat "sheet closed" as "no edits for this duration".
+const QUIET_PERIOD_SECONDS = 120;
+const MAX_BUFFERED_CHANGES = 50;
+const MAX_LINES_IN_MESSAGE = 10;
+
+const KEY_PENDING = 'pending_changes';
+const KEY_LAST_EDITED_AT = 'last_edited_at';
+const KEY_SS_NAME = 'spreadsheet_name';
+const KEY_SS_URL = 'spreadsheet_url';
 
 function onEdit(e) {
   if (!e || !e.range) return;
 
-  const range = e.range;
-  const sheet = range.getSheet();
-  const ss = sheet.getParent();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
 
-  const payload = {
-    spreadsheetName: ss.getName(),
-    spreadsheetUrl: ss.getUrl(),
-    sheetName: sheet.getName(),
-    a1Notation: range.getA1Notation(),
-    newValue: typeof e.value !== 'undefined' ? e.value : '',
-    oldValue: typeof e.oldValue !== 'undefined' ? e.oldValue : '',
-    editedAt: new Date().toISOString()
-  };
+  try {
+    const range = e.range;
+    const sheet = range.getSheet();
+    const ss = sheet.getParent();
 
-  if (LINE_GROUP_ID) {
-    payload.groupId = LINE_GROUP_ID;
+    const oneChange = {
+      sheetName: sheet.getName(),
+      a1Notation: range.getA1Notation(),
+      oldValue: typeof e.oldValue !== 'undefined' ? String(e.oldValue) : '',
+      newValue: typeof e.value !== 'undefined' ? String(e.value) : '',
+      editedAt: new Date().toISOString()
+    };
+
+    const props = PropertiesService.getScriptProperties();
+    const pending = JSON.parse(props.getProperty(KEY_PENDING) || '[]');
+    pending.push(oneChange);
+
+    if (pending.length > MAX_BUFFERED_CHANGES) {
+      pending.splice(0, pending.length - MAX_BUFFERED_CHANGES);
+    }
+
+    props.setProperty(KEY_PENDING, JSON.stringify(pending));
+    props.setProperty(KEY_LAST_EDITED_AT, String(Date.now()));
+    props.setProperty(KEY_SS_NAME, ss.getName());
+    props.setProperty(KEY_SS_URL, ss.getUrl());
+
+    // Keep only one pending flush trigger so edits are coalesced.
+    clearFlushTriggers_();
+    ScriptApp.newTrigger('flushBufferedNotifications')
+      .timeBased()
+      .after(QUIET_PERIOD_SECONDS * 1000)
+      .create();
+  } finally {
+    lock.releaseLock();
   }
+}
 
-  const options = {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      'x-api-key': NOTIFY_API_KEY
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
+function flushBufferedNotifications() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
 
-  const resp = UrlFetchApp.fetch(WEBHOOK_URL, options);
-  const code = resp.getResponseCode();
-  if (code >= 300) {
-    console.log('Notify failed: ' + code + ' body=' + resp.getContentText());
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const pending = JSON.parse(props.getProperty(KEY_PENDING) || '[]');
+    const lastEditedAt = Number(props.getProperty(KEY_LAST_EDITED_AT) || '0');
+
+    if (!pending.length || !lastEditedAt) {
+      clearFlushTriggers_();
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastEditedAt < QUIET_PERIOD_SECONDS * 1000) {
+      clearFlushTriggers_();
+      ScriptApp.newTrigger('flushBufferedNotifications')
+        .timeBased()
+        .after(QUIET_PERIOD_SECONDS * 1000)
+        .create();
+      return;
+    }
+
+    const total = pending.length;
+    const head = pending.slice(-MAX_LINES_IN_MESSAGE);
+    const lines = head.map(function(c) {
+      return c.sheetName + ' ' + c.a1Notation + ': ' + c.oldValue + ' -> ' + c.newValue;
+    });
+
+    if (total > head.length) {
+      lines.unshift('... ' + (total - head.length) + '件の変更は省略');
+    }
+
+    const payload = {
+      spreadsheetName: props.getProperty(KEY_SS_NAME) || '',
+      spreadsheetUrl: props.getProperty(KEY_SS_URL) || '',
+      sheetName: '複数',
+      a1Notation: total + '件の変更',
+      oldValue: '',
+      newValue: lines.join('\n'),
+      editedAt: new Date(lastEditedAt).toISOString()
+    };
+
+    if (LINE_GROUP_ID) {
+      payload.groupId = LINE_GROUP_ID;
+    }
+
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        'x-api-key': NOTIFY_API_KEY
+      },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    const resp = UrlFetchApp.fetch(WEBHOOK_URL, options);
+    const code = resp.getResponseCode();
+    if (code >= 300) {
+      console.log('Notify failed: ' + code + ' body=' + resp.getContentText());
+      return;
+    }
+
+    props.deleteProperty(KEY_PENDING);
+    props.deleteProperty(KEY_LAST_EDITED_AT);
+    clearFlushTriggers_();
+  } finally {
+    lock.releaseLock();
   }
+}
+
+function clearFlushTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'flushBufferedNotifications') {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
 }
