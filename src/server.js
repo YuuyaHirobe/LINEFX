@@ -110,6 +110,7 @@ app.post('/notify', express.json(), async (req, res) => {
 
     await client.pushMessage({
       to: targetGroupId,
+      notificationDisabled: true,
       messages: [
         {
           type: 'text',
